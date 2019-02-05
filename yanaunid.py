@@ -76,6 +76,9 @@ class Rule:
         '_name',
         '_name_norm',
         '_matching_rules',
+        '_base_resolved',
+        '_null_fields',
+        'base',
         'nice',
         'ioclass',
         'ionice',
@@ -87,6 +90,10 @@ class Rule:
     _name: str
     _name_norm: str
     _matching_rules: Optional[Any]
+    _base_resolved: bool
+    _null_fields: List[str]
+
+    base: Optional[str]
 
     nice: Optional[int]
     ioclass: Optional[IOClass]
@@ -112,6 +119,10 @@ class Rule:
     def __init__(self, name: str) -> None:
         self.name = name
         self._matching_rules = None
+        self._base_resolved = True
+        self._null_fields = []
+
+        self.base = None
 
         self.nice = None
         self.ioclass = None
@@ -201,7 +212,46 @@ class Rule:
             # TODO: implement
             pass
 
-    # pylint: disable=too-many-branches
+    def resolve_base(self, rules: Dict[str, 'Rule']) -> None:
+        if not self.base or self._base_resolved:
+            return
+
+        try:
+            base_rule: Rule = rules[self.base]
+        except KeyError as e:  # pylint: disable=invalid-name
+            raise KeyError(
+                'Base rule for rule %(name)s not found'
+                % {'name': self.name}
+            ) from e
+
+        # pylint: disable=protected-access
+        if not base_rule._base_resolved:
+            base_rule.resolve_base(rules)
+
+        if self.nice is None and 'nice' not in self._null_fields:
+            self.nice = base_rule.nice
+        if self.ioclass is None and 'ioclass' not in self._null_fields:
+            self.ioclass = base_rule.ioclass
+        if self.ionice is None and 'ionice' not in self._null_fields:
+            self.ionice = base_rule.ionice
+        if self.sched is None and 'sched' not in self._null_fields:
+            self.sched = base_rule.sched
+        if (self.oom_score_adj is None
+                and 'oom_score_adj' not in self._null_fields):
+            self.oom_score_adj = base_rule.oom_score_adj
+        if self.cgroup is None and 'cgroup' not in self._null_fields:
+            self.cgroup = base_rule.cgroup
+
+        if self.sched_prio is not None:
+            if (self.sched is not None
+                    and self.sched not in (Scheduler.FIFO, Scheduler.RR)):
+                raise FormatError('You can only set a scheduling priority for '
+                                  'the FIFO and RR schedulers.')
+        elif self.sched in (Scheduler.FIFO, Scheduler.RR):
+            raise FormatError('You need to specify a scheduling priority with '
+                              'the FIFO and RR schedulers.')
+
+    # pylint: disable=too-many-branches,too-many-statements
     def load_from_dict(self, data: Mapping[str, Any]) -> None:
         if 'match' in data:
             if data['match'] is None:
@@ -210,12 +260,14 @@ class Rule:
                 # TODO: implement
                 pass
 
-        # TODO: implement
-        #if 'super' in data:
-        #    pass
+        if 'base' in data:
+            self.base = str(data['base'])
+            self._base_resolved = False
 
         if 'nice' in data:
-            if isinstance(data['nice'], int):
+            if data['nice'] is None:
+                self._null_fields.append('nice')
+            elif isinstance(data['nice'], int):
                 self.nice = data['nice']
                 if self.nice < -20 or self.nice > 19:
                     raise ValueError('Niceness must be in the range [-20, 19]')
@@ -223,7 +275,9 @@ class Rule:
                 raise FormatError('Niceness must be an integer')
 
         if 'ioclass' in data:
-            if isinstance(data['ioclass'], int):
+            if data['ioclass'] is None:
+                self._null_fields.append('ioclass')
+            elif isinstance(data['ioclass'], int):
                 self.ioclass = IOClass(data['ioclass'])
             else:
                 try:
@@ -238,7 +292,9 @@ class Rule:
                                      % {'ioclass': data['ioclass']})
 
         if 'ionice' in data:
-            if isinstance(data['ionice'], int):
+            if data['ionice'] is None:
+                self._null_fields.append('ionice')
+            elif isinstance(data['ionice'], int):
                 self.ionice = data['ionice']
                 if self.ionice < 0 or self.ionice > 7:
                     raise ValueError('I/O priority must be in the '
@@ -247,7 +303,9 @@ class Rule:
                 raise FormatError('I/O priority must be an integer')
 
         if 'sched' in data:
-            if isinstance(data['sched'], int):
+            if data['sched'] is None:
+                self._null_fields.append('sched')
+            elif isinstance(data['sched'], int):
                 self.sched = Scheduler(data['sched'])
             else:
                 try:
@@ -267,7 +325,9 @@ class Rule:
                                      % {'sched': data['sched']})
 
         if 'sched_prio' in data:
-            if isinstance(data['sched_prio'], int):
+            if data['sched_prio'] is None:
+                self._null_fields.append('sched_prio')
+            elif isinstance(data['sched_prio'], int):
                 self.sched_prio = data['sched_prio']
                 if self.sched_prio < 1 or self.sched_prio > 99:
                     raise ValueError('Scheduling priority must be in the '
@@ -276,7 +336,9 @@ class Rule:
                 raise FormatError('Scheduling priority must be an integer')
 
         if 'oom_score_adj' in data:
-            if isinstance(data['oom_score_adj'], int):
+            if data['oom_score_adj'] is None:
+                self._null_fields.append('oom_score_adj')
+            elif isinstance(data['oom_score_adj'], int):
                 self.oom_score_adj = data['oom_score_adj']
                 if self.oom_score_adj < -1000 or self.oom_score_adj > 1000:
                     raise ValueError('OOM score adjustment must be in the '
@@ -285,8 +347,11 @@ class Rule:
                 raise FormatError('OOM score adjustment must be an integer')
 
         if 'cgroup' in data:
-            self.cgroup = str(data['cgroup'])
-            # TODO: verify cgroup exists
+            if data['cgroup'] is None:
+                self._null_fields.append('cgroup')
+            else:
+                self.cgroup = str(data['cgroup'])
+                # TODO: verify cgroup exists
 
     @staticmethod
     def load(
@@ -375,6 +440,7 @@ class Yanaunid:
             for filename in filenames:
                 if not fnmatch.fnmatch(filename, '*.rules'):
                     continue
+
                 try:
                     with open(os.path.join(dirpath, filename), 'r') as file:
                         for rule in Rule.load(file):
@@ -392,6 +458,20 @@ class Yanaunid:
                         'Exception while parsing rule file (%(filename)s)',
                         {'filename': filename}
                     )
+
+                _rules_to_disable: List[str] = []
+                for rule in self.rules.values():
+                    try:
+                        rule.resolve_base(self.rules)
+                    except Exception:  # pylint: disable=broad-except
+                        self.logger.exception(
+                            'Exception while resolving rule %(name)s, '
+                            'disabling rule.',
+                            {'name': rule.name}
+                        )
+                        _rules_to_disable.append(rule.name)
+                for rule_name in _rules_to_disable:
+                    del self.rules[rule_name]
 
     def _handle_processes(self, proc_ids: Iterable[int]) -> None:
         for pid in proc_ids:
