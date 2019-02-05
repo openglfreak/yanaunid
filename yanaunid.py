@@ -102,6 +102,10 @@ class Rule:
 
     @name.setter
     def name(self, value: str) -> None:
+        if value is None:
+            raise ValueError('name must not be None')
+        if not value:
+            raise ValueError('name must not be empty')
         self._name = value
         self._name_norm = normalize_casefold(value)
 
