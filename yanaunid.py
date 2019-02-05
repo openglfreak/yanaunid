@@ -70,7 +70,7 @@ class Scheduler(enum.IntEnum):
 
 # pylint: disable=too-many-instance-attributes
 class Rule:
-    class Match(abc.ABC):
+    class Matcher(abc.ABC):
         @abc.abstractmethod
         def matches(
                 self,
@@ -79,7 +79,7 @@ class Rule:
         ) -> bool:
             return False
 
-    class NeverMatch(Match):
+    class NeverMatchingMatcher(Matcher):
         def matches(
                 self,
                 rule: 'Rule',
@@ -87,7 +87,7 @@ class Rule:
         ) -> bool:
             return False
 
-    class DefaultMatch(Match):
+    class DefaultMatcher(Matcher):
         __slots__ = ('_name', '_name_norm')
         _name: str
         _name_norm: str
@@ -164,12 +164,12 @@ class Rule:
 
     def matches(self, process: psutil.Process) -> bool:
         if not self._matching_rules:
-            return Rule.DefaultMatch().matches(self, process)
-        if isinstance(self._matching_rules, Rule.Match):
+            return Rule.DefaultMatcher().matches(self, process)
+        if isinstance(self._matching_rules, Rule.Matcher):
             return self._matching_rules.matches(self, process)
         ret: bool = True
         for matching_rule in self._matching_rules:
-            if isinstance(matching_rule, Rule.Match):
+            if isinstance(matching_rule, Rule.Matcher):
                 ret &= matching_rule.matches(self, process)
         # TODO: implement
         return ret
@@ -273,7 +273,7 @@ class Rule:
     def load_from_dict(self, data: Mapping[str, Any]) -> None:
         if 'match' in data:
             if data['match'] is None:
-                self._matching_rules = Rule.NeverMatch()
+                self._matching_rules = Rule.NeverMatchingMatcher()
             else:
                 # TODO: implement
                 pass
