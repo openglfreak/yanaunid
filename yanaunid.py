@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 '''Yanaunid - Yet ANother AUto NIce Daemon'''
 
+import abc
 import dataclasses
 import enum
 import fnmatch
@@ -69,12 +70,55 @@ class Scheduler(enum.IntEnum):
 
 # pylint: disable=too-many-instance-attributes
 class Rule:
-    class NeverMatch:
-        pass
+    class Match(abc.ABC):
+        @abc.abstractmethod
+        def matches(
+                self,
+                rule: 'Rule',
+                process: psutil.Process
+        ) -> bool:
+            return False
+
+    class NeverMatch(Match):
+        def matches(
+                self,
+                rule: 'Rule',
+                process: psutil.Process
+        ) -> bool:
+            return False
+
+    class DefaultMatch(Match):
+        __slots__ = ('_name', '_name_norm')
+        _name: str
+        _name_norm: str
+
+        def __init__(self) -> None:
+            self._name = ''
+            self._name_norm = ''
+
+        def matches(
+                self,
+                rule: 'Rule',
+                process: psutil.Process
+        ) -> bool:
+            if self._name != rule.name:
+                self._name = rule.name
+                self._name_norm = normalize_casefold(self._name)
+
+            try:
+                if normalize_casefold(process.name()) == self._name_norm:
+                    return True
+            except psutil.AccessDenied:
+                pass
+            try:
+                if normalize_casefold(process.exe()).endswith(self._name_norm):
+                    return True
+            except psutil.AccessDenied:
+                pass
+            return False
 
     __slots__ = (
-        '_name',
-        '_name_norm',
+        'name',
         '_matching_rules',
         '_base_resolved',
         '_null_fields',
@@ -87,8 +131,7 @@ class Rule:
         'oom_score_adj',
         'cgroup'
     )
-    _name: str
-    _name_norm: str
+    name: str
     _matching_rules: Optional[Any]
     _base_resolved: bool
     _null_fields: List[str]
@@ -102,19 +145,6 @@ class Rule:
     sched_prio: Optional[int]
     oom_score_adj: Optional[int]
     cgroup: Optional[str]
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @name.setter
-    def name(self, value: str) -> None:
-        if value is None:
-            raise ValueError('name must not be None')
-        if not value:
-            raise ValueError('name must not be empty')
-        self._name = value
-        self._name_norm = normalize_casefold(value)
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -132,29 +162,17 @@ class Rule:
         self.oom_score_adj = None
         self.cgroup = None
 
-    def _matches_default(self, process: psutil.Process) -> bool:
-        if self._name_norm is None:
-            return False
-
-        try:
-            if normalize_casefold(process.name()) == self._name_norm:
-                return True
-        except psutil.AccessDenied:
-            pass
-        try:
-            if normalize_casefold(process.exe()).endswith(self._name_norm):
-                return True
-        except psutil.AccessDenied:
-            pass
-        return False
-
     def matches(self, process: psutil.Process) -> bool:
         if not self._matching_rules:
-            return self._matches_default(process)
-        if isinstance(self._matching_rules, Rule.NeverMatch):
-            return False
+            return Rule.DefaultMatch().matches(self, process)
+        if isinstance(self._matching_rules, Rule.Match):
+            return self._matching_rules.matches(self, process)
+        ret: bool = True
+        for matching_rule in self._matching_rules:
+            if isinstance(matching_rule, Rule.Match):
+                ret &= matching_rule.matches(self, process)
         # TODO: implement
-        return False
+        return ret
 
     # pylint: disable=too-many-branches
     def apply(self, process: psutil.Process) -> None:
