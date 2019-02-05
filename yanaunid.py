@@ -478,48 +478,51 @@ class Yanaunid:
             if pid == 0:
                 continue
 
-            process: psutil.Process
-
             try:
-                process = psutil.Process(pid)
-            except psutil.NoSuchProcess:
-                continue
+                process: psutil.Process = psutil.Process(pid)
 
-            _ignored_rules: List[Rule] = self._ignored_rules.get(process, [])
+                _ignored_rules: List[Rule] = \
+                    self._ignored_rules.get(process, [])
 
-            with process.oneshot():
-                for rule in self.rules.values():
-                    if rule in _ignored_rules:
-                        continue
+                with process.oneshot():
+                    for rule in self.rules.values():
+                        if rule in _ignored_rules:
+                            continue
 
-                    matches: bool
+                        matches: bool
 
-                    try:
-                        matches = rule.matches(process)
-                    except Exception:  # pylint: disable=broad-except
-                        self.logger.exception(
-                            'Exception while matching rule %(rule)s, '
-                            'disabling rule for this process.',
-                            {'rule': rule.name}
-                        )
-                        _ignored_rules.append(rule)
-                        continue
+                        try:
+                            matches = rule.matches(process)
+                        except (ProcessLookupError, psutil.NoSuchProcess):
+                            raise
+                        except Exception:  # pylint: disable=broad-except
+                            self.logger.exception(
+                                'Exception while matching rule %(rule)s, '
+                                'disabling rule for this process.',
+                                {'rule': rule.name}
+                            )
+                            _ignored_rules.append(rule)
+                            continue
 
-                    if not matches:
-                        continue
+                        if not matches:
+                            continue
 
-                    try:
-                        rule.apply(process)
-                    except Exception:  # pylint: disable=broad-except
-                        self.logger.exception(
-                            'Exception while applying rule %(rule)s, '
-                            'disabling rule for this process.',
-                            {'rule': rule.name}
-                        )
-                        _ignored_rules.append(rule)
+                        try:
+                            rule.apply(process)
+                        except (ProcessLookupError, psutil.NoSuchProcess):
+                            raise
+                        except Exception:  # pylint: disable=broad-except
+                            self.logger.exception(
+                                'Exception while applying rule %(rule)s, '
+                                'disabling rule for this process.',
+                                {'rule': rule.name}
+                            )
+                            _ignored_rules.append(rule)
 
-            if _ignored_rules:
-                self._ignored_rules[process] = _ignored_rules
+                if _ignored_rules:
+                    self._ignored_rules[process] = _ignored_rules
+            except (ProcessLookupError, psutil.NoSuchProcess):
+                pass
 
     def run(self) -> None:
         if not self.rules:
