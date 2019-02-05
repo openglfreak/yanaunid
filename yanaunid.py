@@ -69,6 +69,9 @@ class Scheduler(enum.IntEnum):
 
 # pylint: disable=too-many-instance-attributes
 class Rule:
+    class NeverMatch:
+        pass
+
     __slots__ = (
         '_name',
         '_name_norm',
@@ -133,6 +136,8 @@ class Rule:
     def matches(self, process: psutil.Process) -> bool:
         if not self._matching_rules:
             return self._matches_default(process)
+        if isinstance(self._matching_rules, Rule.NeverMatch):
+            return False
         # TODO: implement
         return False
 
@@ -194,12 +199,15 @@ class Rule:
 
     # pylint: disable=too-many-branches
     def load_from_dict(self, data: Mapping[str, Any]) -> None:
-        # TODO: implement
-        #if 'match' in data:
-        #    pass
+        if 'match' in data:
+            if data['match'] is None:
+                self._matching_rules = Rule.NeverMatch()
+            else:
+                # TODO: implement
+                pass
 
         # TODO: implement
-        #if 'type' in data:
+        #if 'super' in data:
         #    pass
 
         if 'nice' in data:
