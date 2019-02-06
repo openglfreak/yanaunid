@@ -10,6 +10,7 @@ import logging
 import numbers
 import os
 import os.path
+import pathlib
 import time
 import unicodedata
 from typing import Any, Dict, Generator, IO, Iterable, List, Mapping, \
@@ -29,8 +30,8 @@ else:
     PathLike = Union[str, bytes, os.PathLike]
 
 
-def normalize_casefold(string: str) -> str:
-    return unicodedata.normalize('NFKD', string).casefold()
+def normalize(string: str) -> str:
+    return unicodedata.normalize('NFKD', string)
 
 
 class FormatError(Exception):
@@ -87,12 +88,39 @@ class Rule:
         ) -> bool:
             return False
 
-    class DefaultMatcher(Matcher):
+    # pylint: disable=abstract-method
+    class StringMatcher(Matcher):
+        __slots__ = ('_normalize', '_case_insensitive')
+        _normalize: bool
+        _case_insensitive: bool
+
+        @property
+        def normalize(self) -> bool:
+            return self._normalize
+
+        @property
+        def case_insensitive(self) -> bool:
+            return self._case_insensitive
+
+        def __init__(
+                self,
+                normalize: bool = True,  # pylint: disable=redefined-outer-name
+                case_insensitive: bool = False
+        ) -> None:
+            self._normalize = normalize
+            self._case_insensitive = case_insensitive
+
+    class DefaultMatcher(StringMatcher):
         __slots__ = ('_name', '_name_norm')
         _name: str
         _name_norm: str
 
-        def __init__(self) -> None:
+        def __init__(
+                self,
+                normalize: bool = True,  # pylint: disable=redefined-outer-name
+                case_insensitive: bool = False
+        ) -> None:
+            super().__init__(normalize, case_insensitive)
             self._name = ''
             self._name_norm = ''
 
@@ -103,15 +131,29 @@ class Rule:
         ) -> bool:
             if self._name != rule.name:
                 self._name = rule.name
-                self._name_norm = normalize_casefold(self._name)
+                self._name_norm = self._name
+                if self.normalize:
+                    self._name_norm = normalize(self._name_norm)
+                if self.case_insensitive:
+                    self._name_norm = self._name_norm.casefold()
 
             try:
-                if normalize_casefold(process.name()) == self._name_norm:
+                name: str = normalize(process.name())
+                if self.case_insensitive:
+                    name = name.casefold()
+                if name == self._name_norm:
                     return True
             except psutil.AccessDenied:
                 pass
             try:
-                if normalize_casefold(process.exe()).endswith(self._name_norm):
+                exe: str = normalize(process.exe())
+                if self.case_insensitive:
+                    exe = exe.casefold()
+                if exe[1:3] == ':\\':
+                    exe = pathlib.PureWindowsPath(exe).name
+                else:
+                    exe = pathlib.PurePath(exe).name
+                if exe == self._name_norm:
                     return True
             except psutil.AccessDenied:
                 pass
@@ -171,7 +213,6 @@ class Rule:
         for matching_rule in self._matching_rules:
             if isinstance(matching_rule, Rule.Matcher):
                 ret &= matching_rule.matches(self, process)
-        # TODO: implement
         return ret
 
     # pylint: disable=too-many-branches
@@ -375,7 +416,7 @@ class Rule:
     def load(
             stream: IO[str]
     ) -> Generator[Union['Rule', Exception], None, None]:
-        def normalize(
+        def _normalize(
                 data: Union[
                     Mapping[str, Mapping[str, Any]],
                     Iterable[Mapping[str, Mapping[str, Any]]]
@@ -395,7 +436,7 @@ class Rule:
                     yield FormatError('Rule files must contain exactly one '
                                       'mapping or one list of mappings')
 
-        for rule_data in normalize(yaml.load(stream)):
+        for rule_data in _normalize(yaml.load(stream)):
             if isinstance(rule_data, Exception):
                 yield rule_data
                 continue
