@@ -495,42 +495,45 @@ class Yanaunid:
 
     def load_rules(self) -> None:
         self.rules = {}
-        for dirpath, _, filenames in os.walk(Yanaunid._DEFAULT_RULES_PATH):
-            for filename in filenames:
-                if not fnmatch.fnmatch(filename, '*.rules'):
-                    continue
+        for filepath in (
+                os.path.join(dirpath, filename)
+                for dirpath, _, filenames in os.walk(
+                        Yanaunid._DEFAULT_RULES_PATH
+                )
+                for filename in filenames
+                if fnmatch.fnmatch(filename, '*.rules')
+        ):
+            try:
+                with open(filepath, 'r') as file:
+                    for rule in Rule.load(file):
+                        if isinstance(rule, Exception):
+                            self.logger.error(
+                                'Exception while processing rule '
+                                '(in file %(filepath)s)',
+                                {'filepath': filepath},
+                                exc_info=rule
+                            )
+                        else:
+                            self.rules[rule.name] = rule
+            except Exception:  # pylint: disable=broad-except
+                self.logger.exception(
+                    'Exception while parsing rule file (%(filepath)s)',
+                    {'filepath': filepath}
+                )
 
+            _rules_to_disable: List[str] = []
+            for rule in self.rules.values():
                 try:
-                    with open(os.path.join(dirpath, filename), 'r') as file:
-                        for rule in Rule.load(file):
-                            if isinstance(rule, Exception):
-                                self.logger.error(
-                                    'Exception while processing rule '
-                                    '(in file %(filename)s)',
-                                    {'filename': filename},
-                                    exc_info=rule
-                                )
-                            else:
-                                self.rules[rule.name] = rule
+                    rule.resolve_base(self.rules)
                 except Exception:  # pylint: disable=broad-except
                     self.logger.exception(
-                        'Exception while parsing rule file (%(filename)s)',
-                        {'filename': filename}
+                        'Exception while resolving rule %(name)s, '
+                        'disabling rule.',
+                        {'name': rule.name}
                     )
-
-                _rules_to_disable: List[str] = []
-                for rule in self.rules.values():
-                    try:
-                        rule.resolve_base(self.rules)
-                    except Exception:  # pylint: disable=broad-except
-                        self.logger.exception(
-                            'Exception while resolving rule %(name)s, '
-                            'disabling rule.',
-                            {'name': rule.name}
-                        )
-                        _rules_to_disable.append(rule.name)
-                for rule_name in _rules_to_disable:
-                    del self.rules[rule_name]
+                    _rules_to_disable.append(rule.name)
+            for rule_name in _rules_to_disable:
+                del self.rules[rule_name]
 
     def _handle_processes(self, proc_ids: Iterable[int]) -> None:
         for pid in proc_ids:
