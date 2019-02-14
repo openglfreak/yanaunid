@@ -312,105 +312,116 @@ class Rule:
 
     # pylint: disable=too-many-branches,too-many-statements
     def load_from_dict(self, data: Mapping[str, Any]) -> None:
-        if 'match' in data:
-            if data['match'] is None:
-                self._matching_rules = Rule.NeverMatchingMatcher()
-            else:
-                # TODO: implement
-                pass
+        for key, value in data.items():
+            if key == 'match':
+                if value is None:
+                    self._matching_rules = Rule.NeverMatchingMatcher()
+                else:
+                    # TODO: implement
+                    pass
 
-        if 'base' in data:
-            self.base = str(data['base'])
-            self._base_resolved = False
+            elif key == 'base':
+                self.base = str(value)
+                self._base_resolved = False
 
-        if 'nice' in data:
-            if data['nice'] is None:
-                self._null_fields.append('nice')
-            elif isinstance(data['nice'], int):
-                self.nice = data['nice']
-                if self.nice < -20 or self.nice > 19:
-                    raise ValueError('Niceness must be in the range [-20, 19]')
-            else:
-                raise FormatError('Niceness must be an integer')
+            elif key == 'nice':
+                if value is None:
+                    self._null_fields.append('nice')
+                elif isinstance(value, int):
+                    if value < -20 or value > 19:
+                        raise ValueError(
+                            'Niceness must be in the range [-20, 19]'
+                        )
+                    self.nice = value
+                else:
+                    raise FormatError('Niceness must be an integer')
 
-        if 'ioclass' in data:
-            if data['ioclass'] is None:
-                self._null_fields.append('ioclass')
-            elif isinstance(data['ioclass'], int):
-                self.ioclass = IOClass(data['ioclass'])
-            else:
-                try:
-                    self.ioclass = {
-                        'none': IOClass.NONE,
-                        'realtime': IOClass.REALTIME,
-                        'best-effort': IOClass.BEST_EFFORT,
-                        'idle': IOClass.IDLE,
-                    }[str(data['ioclass']).casefold()]
-                except KeyError:
-                    raise ValueError('I/O class %(ioclass)s not found'
-                                     % {'ioclass': data['ioclass']})
+            elif key == 'ioclass':
+                if value is None:
+                    self._null_fields.append('ioclass')
+                elif isinstance(value, int):
+                    self.ioclass = IOClass(value)
+                else:
+                    try:
+                        self.ioclass = {
+                            'none': IOClass.NONE,
+                            'realtime': IOClass.REALTIME,
+                            'best-effort': IOClass.BEST_EFFORT,
+                            'idle': IOClass.IDLE,
+                        }[str(value).casefold()]
+                    except KeyError:
+                        raise ValueError('I/O class %(ioclass)s not found'
+                                         % {'ioclass': value})
 
-        if 'ionice' in data:
-            if data['ionice'] is None:
-                self._null_fields.append('ionice')
-            elif isinstance(data['ionice'], int):
-                self.ionice = data['ionice']
-                if self.ionice < 0 or self.ionice > 7:
-                    raise ValueError('I/O priority must be in the '
-                                     'range [0, 7]')
-            else:
-                raise FormatError('I/O priority must be an integer')
+            elif key == 'ionice':
+                if value is None:
+                    self._null_fields.append('ionice')
+                elif isinstance(value, int):
+                    if value < 0 or value > 7:
+                        raise ValueError('I/O priority must be in the '
+                                         'range [0, 7]')
+                    self.ionice = value
+                else:
+                    raise FormatError('I/O priority must be an integer')
 
-        if 'sched' in data:
-            if data['sched'] is None:
-                self._null_fields.append('sched')
-            elif isinstance(data['sched'], int):
-                self.sched = Scheduler(data['sched'])
-            else:
-                try:
-                    self.sched = {
-                        'normal': Scheduler.NORMAL,
-                        'other': Scheduler.OTHER,
-                        'fifo': Scheduler.FIFO,
-                        'rr': Scheduler.RR,
-                        'round-robin': Scheduler.ROUND_ROBIN,
-                        'batch': Scheduler.BATCH,
-                        'iso': Scheduler.ISO,
-                        'idle': Scheduler.IDLE,
-                        'deadline': Scheduler.DEADLINE,
-                    }[str(data['sched']).casefold()]
-                except KeyError:
-                    raise ValueError('Scheduler %(sched)s not found'
-                                     % {'sched': data['sched']})
+            elif key == 'sched':
+                if value is None:
+                    self._null_fields.append('sched')
+                elif isinstance(value, int):
+                    self.sched = Scheduler(value)
+                else:
+                    try:
+                        self.sched = {
+                            'normal': Scheduler.NORMAL,
+                            'other': Scheduler.OTHER,
+                            'fifo': Scheduler.FIFO,
+                            'rr': Scheduler.RR,
+                            'round-robin': Scheduler.ROUND_ROBIN,
+                            'batch': Scheduler.BATCH,
+                            'iso': Scheduler.ISO,
+                            'idle': Scheduler.IDLE,
+                            'deadline': Scheduler.DEADLINE,
+                        }[str(value).casefold()]
+                    except KeyError:
+                        raise ValueError('Scheduler %(sched)s not found'
+                                         % {'sched': value})
 
-        if 'sched_prio' in data:
-            if data['sched_prio'] is None:
-                self._null_fields.append('sched_prio')
-            elif isinstance(data['sched_prio'], int):
-                self.sched_prio = data['sched_prio']
-                if self.sched_prio < 1 or self.sched_prio > 99:
-                    raise ValueError('Scheduling priority must be in the '
-                                     'range [1, 99]')
-            else:
-                raise FormatError('Scheduling priority must be an integer')
+            elif key == 'sched_prio':
+                if value is None:
+                    self._null_fields.append('sched_prio')
+                elif isinstance(value, int):
+                    if value < 1 or value > 99:
+                        raise ValueError('Scheduling priority must be in the '
+                                         'range [1, 99]')
+                    self.sched_prio = value
+                else:
+                    raise FormatError('Scheduling priority must be an integer')
 
-        if 'oom_score_adj' in data:
-            if data['oom_score_adj'] is None:
-                self._null_fields.append('oom_score_adj')
-            elif isinstance(data['oom_score_adj'], int):
-                self.oom_score_adj = data['oom_score_adj']
-                if self.oom_score_adj < -1000 or self.oom_score_adj > 1000:
-                    raise ValueError('OOM score adjustment must be in the '
-                                     'range [-1000, 1000]')
-            else:
-                raise FormatError('OOM score adjustment must be an integer')
+            elif key == 'oom_score_adj':
+                if value is None:
+                    self._null_fields.append('oom_score_adj')
+                elif isinstance(value, int):
+                    if value < -1000 or value > 1000:
+                        raise ValueError('OOM score adjustment must be in the '
+                                         'range [-1000, 1000]')
+                    self.oom_score_adj = value
+                else:
+                    raise FormatError(
+                        'OOM score adjustment must be an integer'
+                    )
 
-        if 'cgroup' in data:
-            if data['cgroup'] is None:
-                self._null_fields.append('cgroup')
+            elif key == 'cgroup':
+                if value is None:
+                    self._null_fields.append('cgroup')
+                else:
+                    self.cgroup = str(value)
+                    # TODO: verify cgroup exists
+
             else:
-                self.cgroup = str(data['cgroup'])
-                # TODO: verify cgroup exists
+                raise FormatError(
+                    'Unknown rule attribute "%(key)s"'
+                    % {'key': key}
+                )
 
     @staticmethod
     def load(
