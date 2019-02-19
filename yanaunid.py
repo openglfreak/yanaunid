@@ -257,15 +257,15 @@ class Rule:
             except PermissionError:
                 pass
 
-        try:
-            if self.oom_score_adj is not None:
+        if self.oom_score_adj is not None:
+            try:
                 with open('/proc/%(pid)s/oom_score_adj'
                           % {'pid': process.pid}, 'r+') as file:
                     prev_oom_score_adj: int = int(file.read())
                     if prev_oom_score_adj != self.oom_score_adj:
                         file.write(str(self.oom_score_adj))
-        except PermissionError:
-            pass
+            except PermissionError:
+                pass
 
         if self.cgroup is not None:
             # TODO: implement
