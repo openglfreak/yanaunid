@@ -21,7 +21,8 @@ from typing import Any, Dict, Generator, IO, Iterable, List, Mapping, \
 import psutil
 import yaml
 
-__all__ = ('Settings', 'Rule', 'Yanaunid')
+__all__ = ('FormatError', 'Settings', 'IOClass', 'Scheduler', 'Rule',
+           'Yanaunid')
 
 Rational = Union[int, float, numbers.Rational]
 MYPY = False
