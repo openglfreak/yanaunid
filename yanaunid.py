@@ -74,6 +74,8 @@ class Scheduler(enum.IntEnum):
 # pylint: disable=too-many-instance-attributes
 class Rule:
     class Matcher(abc.ABC):
+        __slots__ = ()
+
         @abc.abstractmethod
         def matches(
                 self,
@@ -83,6 +85,8 @@ class Rule:
             return False
 
     class NeverMatchingMatcher(Matcher):
+        __slots__ = ()
+
         def matches(
                 self,
                 rule: 'Rule',
