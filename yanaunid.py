@@ -3,6 +3,7 @@
 '''Yanaunid - Yet ANother AUto NIce Daemon'''
 
 import abc
+import argparse
 import dataclasses
 import enum
 import fnmatch
@@ -11,6 +12,7 @@ import numbers
 import os
 import os.path
 import pathlib
+import sys
 import time
 import unicodedata
 from typing import Any, Dict, Generator, IO, Iterable, List, Mapping, \
@@ -636,7 +638,12 @@ class Yanaunid:
                 end = start + step
 
 
-def main() -> None:
+def main(args: Sequence[str]) -> None:
+    argparser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description='Yanaunid - Yet ANother AUto NIce Daemon'
+    )
+    argparser.parse_args(args)
+
     yanaunid: Yanaunid = Yanaunid()
     yanaunid.load_settings()
     yanaunid.load_rules()
@@ -644,6 +651,6 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv)
 
 # vim: ai ts=4 sts=4 et sw=4 tw=79 ft=python
