@@ -553,10 +553,7 @@ class Yanaunid:
                 del self.rules[rule_name]
 
     def _handle_processes(self, proc_ids: Iterable[int]) -> None:
-        for pid in proc_ids:
-            if pid == 0:
-                continue
-
+        for pid in (x for x in proc_ids if x != 0):
             try:
                 process: psutil.Process = psutil.Process(pid)
 
@@ -631,10 +628,9 @@ class Yanaunid:
                     refresh_countdown += self.settings.refresh_after
                     pid: int = proc_ids[int(float(end))]
                     proc_ids = psutil.pids()
-                    index: int = 0
-                    for index, value in enumerate(proc_ids):
-                        if value >= pid:
-                            break
+                    index: int = next(
+                        (i for i, v in enumerate(proc_ids) if v >= pid), 0
+                    )
                     if int(float(start)) != index:
                         start = index
                     step = len(proc_ids) / self.settings.slices
