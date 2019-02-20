@@ -646,7 +646,7 @@ class Yanaunid:
 
 def main(args: Sequence[str]) -> None:
     argparser: argparse.ArgumentParser = argparse.ArgumentParser(
-        prog=pathlib.PurePath(args[0]).name if len(args) and args[0] else None,
+        prog=pathlib.PurePath(args[0]).name if args and args[0] else None,
         description='Yanaunid - Yet ANother AUto NIce Daemon'
     )
     argparser.parse_args(args[1:])
