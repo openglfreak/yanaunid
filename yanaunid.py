@@ -560,10 +560,11 @@ class Yanaunid:
                     self._ignored_rules.get(process, [])
 
                 with process.oneshot():
-                    for rule in self.rules.values():
-                        if rule in _ignored_rules:
-                            continue
-
+                    for rule in (
+                            x
+                            for x in self.rules.values()
+                            if x not in _ignored_rules
+                    ):
                         matches: bool
 
                         try:
