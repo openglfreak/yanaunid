@@ -72,100 +72,104 @@ class Scheduler(enum.IntEnum):
     DEADLINE = 6
 
 
+class Matcher(abc.ABC):
+    __slots__ = ()
+
+    @abc.abstractmethod
+    def matches(
+            self,
+            rule: 'Rule',
+            process: psutil.Process
+    ) -> bool:
+        return False
+
+
+class NeverMatchingMatcher(Matcher):
+    __slots__ = ()
+
+    def matches(
+            self,
+            rule: 'Rule',
+            process: psutil.Process
+    ) -> bool:
+        return False
+
+
+# pylint: disable=abstract-method
+class StringMatcher(Matcher):
+    __slots__ = ('_normalize', '_case_insensitive')
+    _normalize: bool
+    _case_insensitive: bool
+
+    @property
+    def normalize(self) -> bool:
+        return self._normalize
+
+    @property
+    def case_insensitive(self) -> bool:
+        return self._case_insensitive
+
+    def __init__(
+            self,
+            normalize: bool = True,  # pylint: disable=redefined-outer-name
+            case_insensitive: bool = False
+    ) -> None:
+        self._normalize = normalize
+        self._case_insensitive = case_insensitive
+
+
+class DefaultMatcher(StringMatcher):
+    __slots__ = ('_name', '_name_norm')
+    _name: str
+    _name_norm: str
+
+    def __init__(
+            self,
+            normalize: bool = True,  # pylint: disable=redefined-outer-name
+            case_insensitive: bool = False
+    ) -> None:
+        super().__init__(normalize, case_insensitive)
+        self._name = ''
+        self._name_norm = ''
+
+    def matches(
+            self,
+            rule: 'Rule',
+            process: psutil.Process
+    ) -> bool:
+        if self._name != rule.name:
+            self._name = rule.name
+            self._name_norm = self._name
+            if self.normalize:
+                self._name_norm = normalize(self._name_norm)
+            if self.case_insensitive:
+                self._name_norm = self._name_norm.casefold()
+
+        try:
+            name: str = normalize(process.name())
+            if self.case_insensitive:
+                name = name.casefold()
+            if name == self._name_norm:
+                return True
+        except psutil.AccessDenied:
+            pass
+        try:
+            exe: str = normalize(process.exe())
+            if self.case_insensitive:
+                exe = exe.casefold()
+            if exe[1:3] == ':\\':
+                exe = pathlib.PureWindowsPath(exe).name
+            else:
+                exe = pathlib.PurePath(exe).name
+            if exe == self._name_norm:
+                return True
+        except psutil.AccessDenied:
+            pass
+        return False
+
+
 # pylint: disable=too-many-instance-attributes
 class Rule:
-    class Matcher(abc.ABC):
-        __slots__ = ()
-
-        @abc.abstractmethod
-        def matches(
-                self,
-                rule: 'Rule',
-                process: psutil.Process
-        ) -> bool:
-            return False
-
-    class NeverMatchingMatcher(Matcher):
-        __slots__ = ()
-
-        def matches(
-                self,
-                rule: 'Rule',
-                process: psutil.Process
-        ) -> bool:
-            return False
-
-    # pylint: disable=abstract-method
-    class StringMatcher(Matcher):
-        __slots__ = ('_normalize', '_case_insensitive')
-        _normalize: bool
-        _case_insensitive: bool
-
-        @property
-        def normalize(self) -> bool:
-            return self._normalize
-
-        @property
-        def case_insensitive(self) -> bool:
-            return self._case_insensitive
-
-        def __init__(
-                self,
-                normalize: bool = True,  # pylint: disable=redefined-outer-name
-                case_insensitive: bool = False
-        ) -> None:
-            self._normalize = normalize
-            self._case_insensitive = case_insensitive
-
-    class DefaultMatcher(StringMatcher):
-        __slots__ = ('_name', '_name_norm')
-        _name: str
-        _name_norm: str
-
-        def __init__(
-                self,
-                normalize: bool = True,  # pylint: disable=redefined-outer-name
-                case_insensitive: bool = False
-        ) -> None:
-            super().__init__(normalize, case_insensitive)
-            self._name = ''
-            self._name_norm = ''
-
-        def matches(
-                self,
-                rule: 'Rule',
-                process: psutil.Process
-        ) -> bool:
-            if self._name != rule.name:
-                self._name = rule.name
-                self._name_norm = self._name
-                if self.normalize:
-                    self._name_norm = normalize(self._name_norm)
-                if self.case_insensitive:
-                    self._name_norm = self._name_norm.casefold()
-
-            try:
-                name: str = normalize(process.name())
-                if self.case_insensitive:
-                    name = name.casefold()
-                if name == self._name_norm:
-                    return True
-            except psutil.AccessDenied:
-                pass
-            try:
-                exe: str = normalize(process.exe())
-                if self.case_insensitive:
-                    exe = exe.casefold()
-                if exe[1:3] == ':\\':
-                    exe = pathlib.PureWindowsPath(exe).name
-                else:
-                    exe = pathlib.PurePath(exe).name
-                if exe == self._name_norm:
-                    return True
-            except psutil.AccessDenied:
-                pass
-            return False
-
     __slots__ = (
         'name',
         '_matching_rules',
@@ -213,12 +217,12 @@ class Rule:
 
     def matches(self, process: psutil.Process) -> bool:
         if not self._matching_rules:
-            return Rule.DefaultMatcher().matches(self, process)
-        if isinstance(self._matching_rules, Rule.Matcher):
+            return DefaultMatcher().matches(self, process)
+        if isinstance(self._matching_rules, Matcher):
             return self._matching_rules.matches(self, process)
         ret: bool = True
         for matching_rule in self._matching_rules:
-            if isinstance(matching_rule, Rule.Matcher):
+            if isinstance(matching_rule, Matcher):
                 ret &= matching_rule.matches(self, process)
         return ret
 
@@ -322,7 +326,7 @@ class Rule:
         for key, value in data.items():
             if key == 'match':
                 if value is None:
-                    self._matching_rules = Rule.NeverMatchingMatcher()
+                    self._matching_rules = NeverMatchingMatcher()
                 else:
                     # TODO: implement
                     pass
