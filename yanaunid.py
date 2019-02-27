@@ -379,10 +379,10 @@ class Rule:
             if (self.sched is not None
                     and self.sched not in (Scheduler.FIFO, Scheduler.RR)):
                 raise FormatError('You can only set a scheduling priority for '
-                                  'the FIFO and RR schedulers.')
+                                  'the FIFO and RR schedulers')
         elif self.sched in (Scheduler.FIFO, Scheduler.RR):
             raise FormatError('You need to specify a scheduling priority with '
-                              'the FIFO and RR schedulers.')
+                              'the FIFO and RR schedulers')
 
     # pylint: disable=too-many-branches,too-many-statements
     def load_from_dict(self, data: Mapping[str, Any]) -> None:
@@ -613,7 +613,7 @@ class Yanaunid:
                 except Exception:  # pylint: disable=broad-except
                     self.logger.exception(
                         'Exception while resolving rule %(name)s, '
-                        'disabling rule.',
+                        'disabling rule',
                         {'name': rule.name}
                     )
                     _rules_to_disable.append(rule.name)
@@ -643,7 +643,7 @@ class Yanaunid:
                         except Exception:  # pylint: disable=broad-except
                             self.logger.exception(
                                 'Exception while matching rule %(rule)s, '
-                                'disabling rule for this process.',
+                                'disabling rule for this process',
                                 {'rule': rule.name}
                             )
                             _ignored_rules.append(rule)
@@ -659,7 +659,7 @@ class Yanaunid:
                         except Exception:  # pylint: disable=broad-except
                             self.logger.exception(
                                 'Exception while applying rule %(rule)s, '
-                                'disabling rule for this process.',
+                                'disabling rule for this process',
                                 {'rule': rule.name}
                             )
                             _ignored_rules.append(rule)
@@ -671,7 +671,9 @@ class Yanaunid:
 
     def run(self) -> None:
         if not self.rules:
-            raise Exception('No rules loaded')
+            self.logger.fatal('No rules loaded')
+            return
+        self.logger.info('%(n)s rules loaded', {'n': len(self.rules)})
 
         self._handle_processes(psutil.pids())
 
@@ -713,6 +715,11 @@ def main(args: Sequence[str]) -> None:
         description='Yanaunid - Yet ANother AUto NIce Daemon'
     )
     argparser.parse_args(args[1:])
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(levelname)s: %(message)s'
+    )
 
     yanaunid: Yanaunid = Yanaunid()
     yanaunid.load_settings()
