@@ -216,10 +216,14 @@ class Rule:
         self.cgroup = None
 
     def matches(self, process: psutil.Process) -> bool:
-        if not self._matching_rules:
+        if self._matching_rules is None:
             return DefaultMatcher().matches(self, process)
+        if not self._matching_rules:
+            return True
         if isinstance(self._matching_rules, Matcher):
             return self._matching_rules.matches(self, process)
+        if len(self._matching_rules) == 1:
+            return self._matching_rules[0].matches(self, process)
         ret: bool = True
         for matching_rule in self._matching_rules:
             if isinstance(matching_rule, Matcher):
@@ -306,6 +310,8 @@ class Rule:
             self.ionice = base_rule.ionice
         if self.sched is None and 'sched' not in self._null_fields:
             self.sched = base_rule.sched
+        if self.sched_prio is None and 'sched_prio' not in self._null_fields:
+            self.sched_prio = base_rule.sched_prio
         if (self.oom_score_adj is None
                 and 'oom_score_adj' not in self._null_fields):
             self.oom_score_adj = base_rule.oom_score_adj
