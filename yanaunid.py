@@ -95,67 +95,123 @@ class NeverMatchingMatcher(Matcher):
         return False
 
 
-# pylint: disable=abstract-method
-class StringMatcher(Matcher):
-    __slots__ = ('_normalize', '_case_insensitive')
+class DefaultMatcher(Matcher):
+    __slots__ = (
+        '_name',
+        '_name_norm',
+        '_name_norm_base',
+        '_normalize',
+        '_case_insensitive'
+    )
+    _name: Optional[str]
+    _name_norm_base: Optional[str]
+    _name_norm: str
     _normalize: bool
     _case_insensitive: bool
+
+    @property
+    def name(self) -> Optional[str]:
+        return self._name
+
+    @name.setter
+    def name(self, value: Optional[str]) -> None:
+        if self._name != value:
+            self._name = value
+            self._name_norm_base = ''
+            if value is not None:
+                self._name_norm = value
+            else:
+                self._name_norm = ''
+                return
+            if self._normalize:
+                self._name_norm = normalize(self._name_norm)
+            if self._case_insensitive:
+                self._name_norm = self._name_norm.casefold()
 
     @property
     def normalize(self) -> bool:
         return self._normalize
 
+    @normalize.setter
+    def normalize(self, value: bool) -> None:
+        if self._normalize != value:
+            self._normalize = value
+            if self._name is not None:
+                self._name_norm = self._name
+            elif self._name_norm_base is not None:
+                self._name_norm = self._name_norm_base
+            else:
+                self._name_norm = ''
+                return
+            if value:
+                self._name_norm = normalize(self._name_norm)
+            if self._case_insensitive:
+                self._name_norm = self._name_norm.casefold()
+
     @property
     def case_insensitive(self) -> bool:
         return self._case_insensitive
 
+    @case_insensitive.setter
+    def case_insensitive(self, value: bool) -> None:
+        if self._case_insensitive != value:
+            self._case_insensitive = value
+            if self._name is not None:
+                self._name_norm = self._name
+            elif self._name_norm_base is not None:
+                self._name_norm = self._name_norm_base
+            else:
+                self._name_norm = ''
+                return
+            if self._normalize:
+                self._name_norm = normalize(self._name_norm)
+            if value:
+                self._name_norm = self._name_norm.casefold()
+
     def __init__(
             self,
-            normalize: bool = True,  # pylint: disable=redefined-outer-name
+            name: Optional[str] = None,
+            normalize: bool = False,  # pylint: disable=redefined-outer-name
             case_insensitive: bool = False
     ) -> None:
+        super().__init__()
+        self._name = name
         self._normalize = normalize
         self._case_insensitive = case_insensitive
 
+        # Moved to a seperate function to avoid the shadowed variable
+        self._initial_norm()
 
-class DefaultMatcher(StringMatcher):
-    __slots__ = ('_name', '_name_norm')
-    _name: str
-    _name_norm: str
-
-    def __init__(
-            self,
-            normalize: bool = True,  # pylint: disable=redefined-outer-name
-            case_insensitive: bool = False
-    ) -> None:
-        super().__init__(normalize, case_insensitive)
-        self._name = ''
-        self._name_norm = ''
-
-    def matches(
-            self,
-            rule: 'Rule',
-            process: psutil.Process
-    ) -> bool:
-        if self._name != rule.name:
-            self._name = rule.name
-            self._name_norm = self._name
+    def _initial_norm(self) -> None:
+        self._name_norm_base = ''
+        if self.name is None:
+            self._name_norm = ''
+        else:
+            self._name_norm = self.name
             if self.normalize:
                 self._name_norm = normalize(self._name_norm)
             if self.case_insensitive:
                 self._name_norm = self._name_norm.casefold()
 
+    # pylint: disable=too-many-branches
+    def matches(
+            self,
+            rule: 'Rule',
+            process: psutil.Process
+    ) -> bool:
+        if self._name is None and self._name_norm_base != rule.name:
+            self._name_norm_base = rule.name
+            self._name_norm = rule.name
+            if self._normalize:
+                self._name_norm = normalize(self._name_norm)
+            if self._case_insensitive:
+                self._name_norm = self._name_norm.casefold()
+
         try:
-            name: str = normalize(process.name())
-            if self.case_insensitive:
-                name = name.casefold()
-            if name == self._name_norm:
-                return True
-        except psutil.AccessDenied:
-            pass
-        try:
-            exe: str = normalize(process.exe())
-            if self.case_insensitive:
+            exe: str = process.exe()
+            if self._normalize:
+                exe = normalize(exe)
+            if self._case_insensitive:
                 exe = exe.casefold()
             if exe[1:3] == ':\\':
                 exe = pathlib.PureWindowsPath(exe).name
@@ -165,6 +221,7 @@ class DefaultMatcher(StringMatcher):
                 return True
         except psutil.AccessDenied:
             pass
+
         return False
 
 
@@ -185,7 +242,7 @@ class Rule:
         'cgroup'
     )
     name: str
-    _matching_rules: Optional[Any]
+    _matching_rules: Optional[Union[Matcher, List[Matcher]]]
     _base_resolved: bool
     _null_fields: List[str]
 
