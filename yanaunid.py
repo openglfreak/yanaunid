@@ -822,7 +822,7 @@ class Rule:
                     raise FormatError('Invalid "match" attribute')
 
             elif key == 'base':
-                if value is not None:
+                if value is None:
                     self._null_fields.append('base')
                 elif isinstance(value, str):
                     self.base = str(value)
