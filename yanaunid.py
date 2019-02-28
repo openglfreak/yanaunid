@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 '''Yanaunid - Yet ANother AUto NIce Daemon'''
 
+# pylint: disable=too-many-lines
+
 import abc
 import argparse
 import dataclasses
@@ -12,18 +14,21 @@ import numbers
 import os
 import os.path
 import pathlib
+import re
 import sys
 import time
 import unicodedata
 from typing import Any, Dict, Generator, IO, Iterable, List, Mapping, \
-    Optional, Sequence, Tuple, Union
+                   Match, Optional, Sequence, Tuple, Union
 
 import psutil
 import yaml
 
-__all__ = ('FormatError', 'Settings', 'IOClass', 'Scheduler', 'Rule',
+__all__ = ('FormatError', 'Settings', 'IOClass', 'Scheduler', 'Matcher',
+           'NeverMatchingMatcher', 'DefaultMatcher', 'PropertyMatcher', 'Rule',
            'Yanaunid')
 
+RATIONAL_TYPES = (int, float, numbers.Rational)
 Rational = Union[int, float, numbers.Rational]
 MYPY = False
 if MYPY:
@@ -96,13 +101,8 @@ class NeverMatchingMatcher(Matcher):
 
 
 class DefaultMatcher(Matcher):
-    __slots__ = (
-        '_name',
-        '_name_norm',
-        '_name_norm_base',
-        '_normalize',
-        '_case_insensitive'
-    )
+    __slots__ = ('_name', '_name_norm', '_name_norm_base', '_normalize',
+                 '_case_insensitive')
     _name: Optional[str]
     _name_norm_base: Optional[str]
     _name_norm: str
@@ -225,22 +225,316 @@ class DefaultMatcher(Matcher):
         return False
 
 
+# pylint: disable=too-many-instance-attributes,too-many-statements
+class PropertyMatcher(Matcher):
+    class Operator(enum.Enum):
+        EqualTo = enum.auto()
+        GreaterThanOrEqualTo = enum.auto()
+        LessThanOrEqualTo = enum.auto()
+        StartsWith = enum.auto()
+        EndsWith = enum.auto()
+        MatchesGlob = enum.auto()
+        MatchesRegex = enum.auto()
+        Contains = enum.auto()
+
+    OPERATOR_MAPPING = {
+        '==': Operator.EqualTo,
+        '>=': Operator.GreaterThanOrEqualTo,
+        '<=': Operator.LessThanOrEqualTo,
+        '^=': Operator.StartsWith,
+        '$=': Operator.EndsWith,
+        '*=': Operator.MatchesGlob,
+        '~=': Operator.MatchesRegex,
+        '%=': Operator.Contains,
+    }
+
+    ALLOWED_TYPES: Dict[Operator, Union[type, Tuple[type, ...]]] = {
+        Operator.EqualTo: (str, *RATIONAL_TYPES),
+        Operator.GreaterThanOrEqualTo: RATIONAL_TYPES,
+        Operator.LessThanOrEqualTo: RATIONAL_TYPES,
+        Operator.StartsWith: (str, Sequence),
+        Operator.EndsWith: (str, Sequence),
+        Operator.MatchesGlob: str,
+        Operator.MatchesRegex: str,
+        Operator.Contains: (str, Sequence, Dict),
+    }
+
+    PROPERTY_WHITELIST: Sequence[str] = ('children', 'cmdline', 'connections',
+                                         'cpu_affinity', 'cpu_num',
+                                         'cpu_percent', 'cpu_times',
+                                         'create_time', 'cwd', 'environ',
+                                         'exe', 'memory_percent', 'name',
+                                         'nice', 'num_fds', 'num_threads',
+                                         'open_files', 'parent', 'pid', 'ppid',
+                                         'status', 'terminal', 'threads',
+                                         'username')
+
+    PARSE_PATTERN = re.compile(r'''^
+        \s*
+        (?P<length>\#)?
+        (?P<name>[^[]+)
+        (?:\[(?P<key>[^]]+)\])?
+        \s*
+        (?P<invert>!?)
+        (?P<op>==|>=|<=|\^=|\$=|\*=|~=|%=)
+        \s*
+        (?P<value>.*?)
+        \s*
+    $''', re.VERBOSE)
+    PARSE_PARTS_PATTERN_PROP = re.compile(r'''^
+        \s*
+        (?P<length>\#)?
+        (?P<name>[^[]+)
+        (?:\[(?P<key>[^]]+)\])?
+        \s*
+    $''', re.VERBOSE)
+    PARSE_PARTS_PATTERN_EXPR = re.compile(r'''^
+        \s*
+        (?P<invert>!?)
+        (?P<op>==|>=|<=|\^=|\$=|\*=|~=|%=)
+        \s*
+        (?P<value>.*?)
+        \s*
+    $''', re.VERBOSE)
+
+    __slots__ = ('name', 'key', 'length', 'operation', 'inverted', 'value',
+                 'normalize_strings', 'case_insensitive', '_cache')
+    name: str
+    key: Optional[Union[int, str]]
+    length: bool
+    operation: Operator
+    inverted: bool
+    value: Any
+    normalize_strings: bool
+    case_insensitive: bool
+    _cache: Optional[Tuple[Operator, Any, Any]]
+
+    # pylint: disable=too-many-arguments
+    def __init__(
+            self,
+            name: str,
+            operation: Operator,
+            value: Any = None,
+            key: Optional[Union[int, str]] = None,
+            length: bool = False,
+            inverted: bool = False
+    ) -> None:
+        self.name = name
+        self.key = key
+        self.length = length
+        self.operation = operation
+        self.inverted = inverted
+        self.value = value
+        self.normalize_strings = False
+        self.case_insensitive = False
+        self._cache = None
+
+    # pylint: disable=too-many-branches
+    def matches(
+            self,
+            rule: 'Rule',
+            process: psutil.Process
+    ) -> bool:
+        if self.name not in PropertyMatcher.PROPERTY_WHITELIST:
+            raise PermissionError(
+                'Property %(name)s not in whitelist'
+                % {'name': self.name}
+            )
+        if not isinstance(
+                self.value,
+                PropertyMatcher.ALLOWED_TYPES[self.operation]
+        ):
+            raise TypeError(
+                'Value of type %(type)s not supported for operation %(op)s'
+                % {'type': self.value.__class__.__name__, 'op': self.operation}
+            )
+
+        value = getattr(process, self.name)
+        if callable(value):
+            value = value()
+        if self.key is not None:
+            try:
+                value = value[self.key]
+            except KeyError:
+                return self.inverted
+        if self.length:
+            try:
+                value = len(value)
+            except TypeError:
+                return self.inverted
+
+        if not isinstance(
+                value,
+                PropertyMatcher.ALLOWED_TYPES[self.operation]
+        ):
+            raise TypeError(
+                'Operation %(op)s not supported on value of type %(type)s'
+                % {'op': self.operation, 'type': value.__class__.__name__}
+            )
+
+        self_value: str = self.value
+
+        if self.normalize_strings:
+            if isinstance(value, str):
+                value = normalize(value)
+            if isinstance(self_value, str):
+                self_value = normalize(self_value)
+        if self.case_insensitive:
+            if isinstance(value, str):
+                value = value.casefold()
+            if isinstance(self_value, str):
+                self_value = self_value.casefold()
+
+        result: bool
+
+        if self.operation == PropertyMatcher.Operator.EqualTo:
+            result = value == self_value
+        elif self.operation == PropertyMatcher.Operator.GreaterThanOrEqualTo:
+            result = value >= self_value
+        elif self.operation == PropertyMatcher.Operator.LessThanOrEqualTo:
+            result = value <= self_value
+        elif self.operation == PropertyMatcher.Operator.StartsWith:
+            if isinstance(value, Sequence):
+                if isinstance(self_value, Sequence):
+                    result = \
+                        value[0:len(self_value)] == self_value[0:len(value)]
+                else:
+                    result = value[0] == self_value
+            else:
+                result = value.startswith(self_value)
+        elif self.operation == PropertyMatcher.Operator.EndsWith:
+            if isinstance(value, Sequence):
+                if isinstance(self_value, Sequence):
+                    result = \
+                        value[-len(self_value):] == self_value[-len(value):]
+                else:
+                    result = value[-1] == self_value
+            else:
+                result = value.endswith(self_value)
+        elif self.operation in (PropertyMatcher.Operator.MatchesGlob,
+                                PropertyMatcher.Operator.MatchesRegex):
+            if (self._cache is None
+                    or self._cache[0] != self.operation
+                    or self._cache[1] != self_value):
+                _value: str = self_value
+                if self.operation == PropertyMatcher.Operator.MatchesGlob:
+                    _value = fnmatch.translate(_value)
+                self._cache = (self.operation, self_value, re.compile(_value))
+            result = self._cache[2].fullmatch(value) is not None
+        elif self.operation == PropertyMatcher.Operator.Contains:
+            result = self_value in value
+        else:
+            assert False
+
+        return result if not self.inverted else not result
+
+    @staticmethod
+    def parse_value(inp: str) -> Any:
+        return yaml.load(inp)
+
+    @staticmethod
+    def parse_name(
+            prop: str,
+            start: int = 0,
+            end: Optional[int] = None
+    ) -> Tuple[Match[str], bool, str, Any]:
+        prop_match: Optional[Match[str]]
+        if end is None:
+            prop_match = PropertyMatcher.PARSE_PARTS_PATTERN_PROP.fullmatch(
+                prop,
+                start
+            )
+        else:
+            prop_match = PropertyMatcher.PARSE_PARTS_PATTERN_PROP.fullmatch(
+                prop,
+                start,
+                end
+            )
+        if prop_match is None:
+            raise FormatError('Could not parse matching rule property name')
+        return (prop_match,
+                bool(prop_match.group('length')),
+                prop_match.group('name'),
+                PropertyMatcher.parse_value(prop_match.group('key'))
+                if prop_match.group('key') is not None
+                else None)
+
+    @staticmethod
+    def parse_test(
+            expr: str,
+            start: int = 0,
+            end: Optional[int] = None
+    ) -> Tuple[Match[str], bool, 'PropertyMatcher.Operator', Any]:
+        expr_match: Optional[Match[str]]
+        if end is None:
+            expr_match = PropertyMatcher.PARSE_PARTS_PATTERN_EXPR.fullmatch(
+                expr,
+                start
+            )
+        else:
+            expr_match = PropertyMatcher.PARSE_PARTS_PATTERN_EXPR.fullmatch(
+                expr,
+                start,
+                end
+            )
+        if expr_match is None:
+            raise FormatError('Could not parse matching rule test expression')
+        return (expr_match,
+                bool(expr_match.group('invert')),
+                PropertyMatcher.OPERATOR_MAPPING[expr_match.group('op')],
+                PropertyMatcher.parse_value(expr_match.group('value')))
+
+    @staticmethod
+    def parse_parts(prop: str, expr: str) -> 'PropertyMatcher':
+        length: bool
+        name: str
+        key: Any
+        _, length, name, key = PropertyMatcher.parse_name(prop)
+
+        invert: bool
+        operation: PropertyMatcher.Operator
+        value: Any
+        _, invert, operation, value = PropertyMatcher.parse_test(expr)
+
+        return PropertyMatcher(
+            name,
+            operation,
+            value,
+            key=key,
+            length=length,
+            inverted=invert
+        )
+
+    @staticmethod
+    def parse(inp: str) -> 'PropertyMatcher':
+        prop_match: Optional[Match[str]]
+        length: bool
+        name: str
+        key: Any
+        prop_match, length, name, key = \
+            PropertyMatcher.parse_name(inp)
+
+        invert: bool
+        operation: PropertyMatcher.Operator
+        value: Any
+        _, invert, operation, value = \
+            PropertyMatcher.parse_test(inp, prop_match.end())
+
+        return PropertyMatcher(
+            name,
+            operation,
+            value,
+            key=key,
+            length=length,
+            inverted=invert
+        )
+
+
 # pylint: disable=too-many-instance-attributes
 class Rule:
-    __slots__ = (
-        'name',
-        '_matching_rules',
-        '_base_resolved',
-        '_null_fields',
-        'base',
-        'nice',
-        'ioclass',
-        'ionice',
-        'sched',
-        'sched_prio',
-        'oom_score_adj',
-        'cgroup'
-    )
+    __slots__ = ('name', '_matching_rules', '_base_resolved', '_null_fields',
+                 'base', 'nice', 'ioclass', 'ionice', 'sched', 'sched_prio',
+                 'oom_score_adj', 'cgroup')
     name: str
     _matching_rules: Optional[Union[Matcher, List[Matcher]]]
     _base_resolved: bool
@@ -384,15 +678,148 @@ class Rule:
             raise FormatError('You need to specify a scheduling priority with '
                               'the FIFO and RR schedulers')
 
+    # pylint: disable=too-many-locals,too-many-statements
+    @staticmethod
+    def load_matching_rule(data: Dict[str, Any]) -> Matcher:
+        if len(data) == 1:
+            item: Tuple[str, Any] = next(iter(data.items()))
+            if not isinstance(item[0], str) or not isinstance(item[1], str):
+                raise FormatError('Invalid matching rule format')
+            return PropertyMatcher.parse_parts(item[0], item[1])
+
+        name: Optional[str] = None
+        _key: Any = None
+        length: bool = False
+        operation: Optional[PropertyMatcher.Operator] = None
+        invert: bool = False
+        _has_value: bool = False
+        _value: Any = None
+        # pylint: disable=redefined-outer-name
+        normalize: bool = False
+        case_insensitive: bool = False
+
+        for key, value in data.items():
+            if key == 'property':
+                if isinstance(value, str):
+                    name = value
+                else:
+                    raise FormatError('Property name must be a string')
+
+            elif key == 'key':
+                _key = value
+
+            elif key == 'length':
+                if isinstance(value, bool):
+                    length = value
+                else:
+                    raise FormatError('"length" must be a boolean')
+
+            elif key == 'operator':
+                if isinstance(value, str):
+                    try:
+                        operation = PropertyMatcher.OPERATOR_MAPPING[value]
+                    except KeyError as e:  # pylint: disable=invalid-name
+                        raise FormatError(
+                            '"%(op)s" is not a valid operator' % {'op': value}
+                        ) from e
+                else:
+                    raise FormatError('Operator must be a string')
+
+            elif key == 'invert':
+                if isinstance(value, bool):
+                    invert = value
+                else:
+                    raise FormatError('"invert" must be a boolean')
+
+            elif key == 'value':
+                _has_value = True
+                _value = value
+
+            elif key == 'test':
+                if isinstance(value, str):
+                    start: int = 0
+
+                    if 'property' not in data:
+                        prop_match: Match[str]
+                        prop_match, length, name, _key = \
+                            PropertyMatcher.parse_name(value)
+                        # TODO: better error messages
+                        if 'length' in data:
+                            raise FormatError('Invalid attribute "length"')
+                        if 'key' in data:
+                            raise FormatError('Invalid attribute "key"')
+
+                        start = prop_match.end()
+
+                    _, invert, operation, _value = \
+                        PropertyMatcher.parse_test(value, start)
+                    _has_value = True
+                    # TODO: better error messages
+                    if invert and 'invert' in data:
+                        raise FormatError('Invalid attribute "invert"')
+                    if 'operator' in data:
+                        raise FormatError('Invalid attribute "operator"')
+                    if 'value' in data:
+                        raise FormatError('Invalid attribute "value"')
+                else:
+                    raise FormatError('Test expression must be a string')
+
+            elif key == 'normalize':
+                if isinstance(value, bool):
+                    normalize = value
+                else:
+                    raise FormatError('"normalize" must be a boolean')
+
+            elif key == 'case_insensitive':
+                if isinstance(value, bool):
+                    case_insensitive = value
+                else:
+                    raise FormatError('"case_insensitive" must be a boolean')
+
+        if name is None:
+            raise FormatError('Matching rule has no property name attribute')
+        if operation is None:
+            raise FormatError('Matching rule has no operator attribute')
+        if not _has_value:
+            raise FormatError('Matching rule has no value attribute')
+
+        prop_matcher = PropertyMatcher(
+            name,
+            operation,
+            _value,
+            key=_key,
+            length=length,
+            inverted=invert
+        )
+        prop_matcher.normalize_strings = normalize
+        prop_matcher.case_insensitive = case_insensitive
+        return prop_matcher
+
     # pylint: disable=too-many-branches,too-many-statements
     def load_from_dict(self, data: Mapping[str, Any]) -> None:
         for key, value in data.items():
             if key == 'match':
                 if value is None:
                     self._matching_rules = NeverMatchingMatcher()
+                elif isinstance(value, str):
+                    try:
+                        self._matching_rules = PropertyMatcher.parse(value)
+                    except FormatError:
+                        self._matching_rules = DefaultMatcher(value)
+                elif isinstance(value, Sequence):
+                    if len(value) == 1:
+                        self._matching_rules = \
+                            Rule.load_matching_rule(value[0])
+                    else:
+                        self._matching_rules = [
+                            Rule.load_matching_rule(_value)
+                            for _value in value
+                        ]
+                elif isinstance(value, Dict):
+                    self._matching_rules = Rule.load_matching_rule(value)
                 else:
-                    # TODO: implement
-                    pass
+                    # TODO: better error message
+                    raise FormatError('Invalid "match" attribute')
 
             elif key == 'base':
                 if value is not None:
