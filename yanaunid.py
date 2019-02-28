@@ -395,8 +395,13 @@ class Rule:
                     pass
 
             elif key == 'base':
-                self.base = str(value)
-                self._base_resolved = False
+                if value is not None:
+                    self._null_fields.append('base')
+                elif isinstance(value, str):
+                    self.base = str(value)
+                    self._base_resolved = False
+                else:
+                    raise FormatError('Base rule name must be a string')
 
             elif key == 'nice':
                 if value is None:
@@ -487,9 +492,11 @@ class Rule:
             elif key == 'cgroup':
                 if value is None:
                     self._null_fields.append('cgroup')
-                else:
+                elif isinstance(value, str):
                     self.cgroup = str(value)
                     # TODO: verify cgroup exists
+                else:
+                    raise FormatError('Control group name must be a string')
 
             else:
                 raise FormatError(
