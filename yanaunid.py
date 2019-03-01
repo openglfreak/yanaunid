@@ -222,7 +222,7 @@ class DefaultMatcher(Matcher):
             if exe[1:3] == ':\\':
                 exe = pathlib.PureWindowsPath(exe).name
             else:
-                exe = pathlib.PurePath(exe).name
+                exe = os.path.basename(exe)
             if exe == self._name_norm:
                 return True
 
@@ -684,6 +684,8 @@ class Rule:
             raise FormatError('You need to specify a scheduling priority with '
                               'the FIFO and RR schedulers')
 
+        self._base_resolved = True
+
     # pylint: disable=too-many-locals,too-many-statements
     @staticmethod
     def load_matching_rule(data: Dict[str, Any]) -> Matcher:
@@ -831,7 +833,7 @@ class Rule:
                 if value is None:
                     self._null_fields.append('base')
                 elif isinstance(value, str):
-                    self.base = str(value)
+                    self.base = value
                     self._base_resolved = False
                 else:
                     raise FormatError('Base rule name must be a string')
