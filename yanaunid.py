@@ -946,24 +946,34 @@ class Rule:
         def _normalize(
                 data: Union[
                     Mapping[str, Mapping[str, Any]],
-                    Iterable[Mapping[str, Mapping[str, Any]]]
+                    Iterable[Mapping[str, Mapping[str, Any]]],
+                    Iterable[Iterable[Mapping[str, Mapping[str, Any]]]]
                 ]
         ) -> Generator[
             Union[Tuple[str, Mapping[str, Any]], Exception], None, None
         ]:
             if isinstance(data, Mapping):
                 yield from data.items()  # type: ignore
-                return
+            elif isinstance(data, Iterable):
+                for item in data:
+                    if isinstance(item, Mapping):
+                        yield from item.items()
+                    elif isinstance(item, Iterable):
+                        for _item in item:
+                            if isinstance(_item, Mapping):
+                                yield from _item.items()
+                            else:
+                                yield FormatError('Rule files must contain '
+                                                  'only mappings or lists of '
+                                                  'mappings')
+                    else:
+                        yield FormatError('Rule files must contain only '
+                                          'mappings or lists of mappings')
+            else:
+                yield FormatError('Rule files must contain only mappings or '
+                                  'lists of mappings')
 
-            for name in data:
-                if isinstance(name, Mapping):
-                    for _name, _data in name.items():
-                        yield _name, _data
-                else:
-                    yield FormatError('Rule files must contain exactly one '
-                                      'mapping or one list of mappings')
-
-        for rule_data in _normalize(yaml.safe_load(stream)):
+        for rule_data in _normalize(yaml.safe_load_all(stream)):
             if isinstance(rule_data, Exception):
                 yield rule_data
                 continue
