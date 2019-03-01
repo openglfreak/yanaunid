@@ -84,7 +84,8 @@ class Matcher(abc.ABC):
     def matches(
             self,
             rule: 'Rule',
-            process: psutil.Process
+            process: psutil.Process,
+            cache: Dict[str, Any]
     ) -> bool:
         return False
 
@@ -95,7 +96,8 @@ class NeverMatchingMatcher(Matcher):
     def matches(
             self,
             rule: 'Rule',
-            process: psutil.Process
+            process: psutil.Process,
+            cache: Dict[str, Any]
     ) -> bool:
         return False
 
@@ -197,7 +199,8 @@ class DefaultMatcher(Matcher):
     def matches(
             self,
             rule: 'Rule',
-            process: psutil.Process
+            process: psutil.Process,
+            cache: Dict[str, Any]
     ) -> bool:
         if self._name is None and self._name_norm_base != rule.name:
             self._name_norm_base = rule.name
@@ -207,8 +210,11 @@ class DefaultMatcher(Matcher):
             if self._case_insensitive:
                 self._name_norm = self._name_norm.casefold()
 
-        try:
-            exe: str = process.exe()
+        if 'exe' not in cache:
+            cache.update(process.as_dict(['exe']))
+
+        exe: str = cache['exe']
+        if exe is not None:
             if self._normalize:
                 exe = normalize(exe)
             if self._case_insensitive:
@@ -219,8 +225,6 @@ class DefaultMatcher(Matcher):
                 exe = pathlib.PurePath(exe).name
             if exe == self._name_norm:
                 return True
-        except psutil.AccessDenied:
-            pass
 
         return False
 
@@ -333,7 +337,8 @@ class PropertyMatcher(Matcher):
     def matches(
             self,
             rule: 'Rule',
-            process: psutil.Process
+            process: psutil.Process,
+            cache: Dict[str, Any]
     ) -> bool:
         if self.name not in PropertyMatcher.PROPERTY_WHITELIST:
             raise PermissionError(
@@ -349,9 +354,10 @@ class PropertyMatcher(Matcher):
                 % {'type': self.value.__class__.__name__, 'op': self.operation}
             )
 
-        value = getattr(process, self.name)
-        if callable(value):
-            value = value()
+        if self.name not in cache:
+            cache.update(process.as_dict([self.name]))
+
+        value = cache[self.name]
         if self.key is not None:
             try:
                 value = value[self.key]
@@ -566,19 +572,19 @@ class Rule:
         self.oom_score_adj = None
         self.cgroup = None
 
-    def matches(self, process: psutil.Process) -> bool:
+    def matches(self, process: psutil.Process, cache: Dict[str, Any]) -> bool:
         if self._matching_rules is None:
-            return DefaultMatcher().matches(self, process)
+            return DefaultMatcher().matches(self, process, cache)
         if not self._matching_rules:
             return True
         if isinstance(self._matching_rules, Matcher):
-            return self._matching_rules.matches(self, process)
+            return self._matching_rules.matches(self, process, cache)
         if len(self._matching_rules) == 1:
-            return self._matching_rules[0].matches(self, process)
+            return self._matching_rules[0].matches(self, process, cache)
         ret: bool = True
         for matching_rule in self._matching_rules:
             if isinstance(matching_rule, Matcher):
-                ret &= matching_rule.matches(self, process)
+                ret &= matching_rule.matches(self, process, cache)
         return ret
 
     # pylint: disable=too-many-branches
@@ -1063,6 +1069,8 @@ class Yanaunid:
                     self._ignored_rules.get(process, [])
 
                 with process.oneshot():
+                    cache: Dict[str, Any] = {}
+
                     for rule in (
                             x
                             for x in self.rules.values()
@@ -1071,7 +1079,7 @@ class Yanaunid:
                         matches: bool
 
                         try:
-                            matches = rule.matches(process)
+                            matches = rule.matches(process, cache)
                         except (ProcessLookupError, psutil.NoSuchProcess):
                             raise
                         except Exception:  # pylint: disable=broad-except
