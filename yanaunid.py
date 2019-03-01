@@ -1130,13 +1130,16 @@ class Yanaunid:
                 refresh_countdown -= 1
                 if refresh_countdown <= 0:
                     refresh_countdown += self.settings.refresh_after
-                    pid: int = proc_ids[int(float(end))]
-                    proc_ids = psutil.pids()
-                    index: int = next(
-                        (i for i, v in enumerate(proc_ids) if v >= pid), 0
-                    )
-                    if int(float(start)) != index:
-                        start = index
+                    if end < len(proc_ids):
+                        pid: int = proc_ids[int(float(end))]
+                        proc_ids = psutil.pids()
+                        index: int = next(
+                            (i for i, v in enumerate(proc_ids) if v >= pid), 0
+                        )
+                        if int(float(start)) != index:
+                            start = index
+                    else:
+                        start = 0
                     step = len(proc_ids) / self.settings.slices
                 else:
                     start = end
