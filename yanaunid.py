@@ -436,7 +436,7 @@ class PropertyMatcher(Matcher):
 
     @staticmethod
     def parse_value(inp: str) -> Any:
-        return yaml.load(inp)
+        return yaml.safe_load(inp)
 
     @staticmethod
     def parse_name(
@@ -963,7 +963,7 @@ class Rule:
                     yield FormatError('Rule files must contain exactly one '
                                       'mapping or one list of mappings')
 
-        for rule_data in _normalize(yaml.load(stream)):
+        for rule_data in _normalize(yaml.safe_load(stream)):
             if isinstance(rule_data, Exception):
                 yield rule_data
                 continue
