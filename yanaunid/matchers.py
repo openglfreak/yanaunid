@@ -3,8 +3,6 @@
 import abc
 import enum
 import fnmatch
-import os
-import pathlib
 import re
 from typing import Any, Dict, Match, Optional, Sequence, Tuple, Union
 
@@ -152,20 +150,19 @@ class DefaultMatcher(Matcher):
             if self._case_insensitive:
                 self._name_norm = self._name_norm.casefold()
 
-        if 'exe' not in cache:
-            cache.update(process.as_dict(['exe']))
+        exe: str
+        try:
+            exe = cache['exe']
+        except KeyError:
+            exe = next(iter(process.as_dict(['exe']).values()))
+            cache['exe'] = exe
 
-        exe: str = cache['exe']
         if exe is not None:
             if self._normalize:
                 exe = normalize(exe)
             if self._case_insensitive:
                 exe = exe.casefold()
-            if exe[1:3] == ':\\':
-                exe = pathlib.PureWindowsPath(exe).name
-            else:
-                exe = os.path.basename(exe)
-            if exe == self._name_norm:
+            if exe.endswith(self._name_norm):
                 return True
 
         return False

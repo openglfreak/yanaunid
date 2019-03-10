@@ -13,6 +13,8 @@ from .misc import IOClass, Scheduler
 
 __all__ = ('Rule',)
 
+DefaultMatcherInstance: DefaultMatcher = DefaultMatcher()
+
 
 # pylint: disable=too-many-instance-attributes
 class Rule:
@@ -51,9 +53,9 @@ class Rule:
         self.cgroup = None
 
     def matches(self, process: psutil.Process, cache: Dict[str, Any]) -> bool:
-        if self._matching_rules is None:
-            return DefaultMatcher().matches(self, process, cache)
         if not self._matching_rules:
+            if self._matching_rules is None:
+                return DefaultMatcherInstance.matches(self, process, cache)
             return True
         if isinstance(self._matching_rules, Matcher):
             return self._matching_rules.matches(self, process, cache)

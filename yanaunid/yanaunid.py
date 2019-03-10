@@ -96,21 +96,24 @@ class Yanaunid:
                 del self.rules[rule_name]
 
     def _handle_processes(self, proc_ids: Iterable[int]) -> None:
-        for pid in (x for x in proc_ids if x != 0):
+        for pid in proc_ids:
+            if pid == 0:
+                continue
+
             try:
                 process: psutil.Process = psutil.Process(pid)
+
+                cache: Dict[str, Any] = {}
 
                 _ignored_rules: List[Rule] = \
                     self._ignored_rules.get(process, [])
 
-                with process.oneshot():
-                    cache: Dict[str, Any] = {}
+                _rules: Iterable[Rule] = self.rules.values()
+                if _ignored_rules:
+                    _rules = set(_ignored_rules).symmetric_difference(_rules)
 
-                    for rule in (
-                            x
-                            for x in self.rules.values()
-                            if x not in _ignored_rules
-                    ):
+                with process.oneshot():
+                    for rule in _rules:
                         matches: bool
 
                         try:
@@ -163,29 +166,18 @@ class Yanaunid:
         while True:
             self._handle_processes(proc_ids[int(float(start)):int(float(end))])
 
-            if float(end) > len(proc_ids):
+            time.sleep(sleep_time)
+            if float(end) >= len(proc_ids):
                 proc_ids = psutil.pids()
                 start = 0
                 step = len(proc_ids) / self.settings.slices
-                end -= len(proc_ids)
             else:
-                time.sleep(sleep_time)
+                start = end
                 refresh_countdown -= 1
                 if refresh_countdown <= 0:
                     refresh_countdown += self.settings.refresh_after
-                    if end < len(proc_ids):
-                        pid: int = proc_ids[int(float(end))]
-                        proc_ids = psutil.pids()
-                        index: int = next(
-                            (i for i, v in enumerate(proc_ids) if v >= pid), 0
-                        )
-                        if int(float(start)) != index:
-                            start = index
-                    else:
-                        start = 0
+                    proc_ids = psutil.pids()
                     step = len(proc_ids) / self.settings.slices
-                else:
-                    start = end
-                end = start + step
+            end = start + step
 
 # vim: ai ts=4 sts=4 et sw=4 tw=79 ft=python

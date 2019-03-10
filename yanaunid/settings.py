@@ -12,8 +12,8 @@ __all__ = ('Settings',)
 @dataclasses.dataclass
 class Settings():
     interval_ms: Rational = 15013
-    slices: int = 1
-    refresh_after: Rational = 1
+    slices: int = 15
+    refresh_after: Rational = 5
 
     def load(self, stream: TextIO) -> None:
         # TODO: implement
