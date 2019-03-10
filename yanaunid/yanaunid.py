@@ -84,7 +84,7 @@ class Yanaunid:
             _rules_to_disable: List[str] = []
             for rule in self.rules.values():
                 try:
-                    rule.resolve_base(self.rules)
+                    rule.resolve_base_rules(self.rules)
                 except Exception:  # pylint: disable=broad-except
                     self.logger.exception(
                         'Exception while resolving rule %(name)s, '

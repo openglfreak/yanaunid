@@ -18,15 +18,15 @@ DefaultMatcherInstance: DefaultMatcher = DefaultMatcher()
 
 # pylint: disable=too-many-instance-attributes
 class Rule:
-    __slots__ = ('name', '_matching_rules', '_base_resolved', '_null_fields',
-                 'base', 'nice', 'ioclass', 'ionice', 'sched', 'sched_prio',
-                 'oom_score_adj', 'cgroup')
+    __slots__ = ('name', '_matching_rules', '_bases_resolved', '_null_fields',
+                 'base_rules', 'nice', 'ioclass', 'ionice', 'sched',
+                 'sched_prio', 'oom_score_adj', 'cgroup')
     name: str
     _matching_rules: Optional[Union[Matcher, List[Matcher]]]
-    _base_resolved: bool
+    _bases_resolved: bool
     _null_fields: List[str]
 
-    base: Optional[str]
+    base_rules: Optional[Union[str, List[str]]]
 
     nice: Optional[int]
     ioclass: Optional[IOClass]
@@ -39,10 +39,10 @@ class Rule:
     def __init__(self, name: str) -> None:
         self.name = name
         self._matching_rules = None
-        self._base_resolved = True
+        self._bases_resolved = True
         self._null_fields = []
 
-        self.base = None
+        self.base_rules = None
 
         self.nice = None
         self.ioclass = None
@@ -123,12 +123,9 @@ class Rule:
             # TODO: implement
             pass
 
-    def resolve_base(self, rules: Dict[str, 'Rule']) -> None:
-        if not self.base or self._base_resolved:
-            return
-
+    def _resolve_base_rule(self, base: str, rules: Dict[str, 'Rule']) -> None:
         try:
-            base_rule: Rule = rules[self.base]
+            base_rule: Rule = rules[base]
         except KeyError as e:  # pylint: disable=invalid-name
             raise KeyError(
                 'Base rule for rule %(name)s not found'
@@ -136,8 +133,8 @@ class Rule:
             ) from e
 
         # pylint: disable=protected-access
-        if not base_rule._base_resolved:
-            base_rule.resolve_base(rules)
+        if not base_rule._bases_resolved:
+            base_rule.resolve_base_rules(rules)
 
         if self.nice is None and 'nice' not in self._null_fields:
             self.nice = base_rule.nice
@@ -155,6 +152,16 @@ class Rule:
         if self.cgroup is None and 'cgroup' not in self._null_fields:
             self.cgroup = base_rule.cgroup
 
+    def resolve_base_rules(self, rules: Dict[str, 'Rule']) -> None:
+        if not self.base_rules or self._bases_resolved:
+            return
+
+        if isinstance(self.base_rules, str):
+            self._resolve_base_rule(self.base_rules, rules)
+        else:
+            for base in self.base_rules:
+                self._resolve_base_rule(base, rules)
+
         if self.sched_prio is not None:
             if (self.sched is not None
                     and self.sched not in (Scheduler.FIFO, Scheduler.RR)):
@@ -164,7 +171,7 @@ class Rule:
             raise FormatError('You need to specify a scheduling priority with '
                               'the FIFO and RR schedulers')
 
-        self._base_resolved = True
+        self._bases_resolved = True
 
     # pylint: disable=too-many-locals,too-many-statements
     @staticmethod
@@ -313,10 +320,16 @@ class Rule:
                 if value is None:
                     self._null_fields.append('base')
                 elif isinstance(value, str):
-                    self.base = value
-                    self._base_resolved = False
+                    self.base_rules = value
+                    self._bases_resolved = False
+                elif (isinstance(value, list)
+                      and all(isinstance(e, str) for e in value)):
+                    self.base_rules = value
+                    self._bases_resolved = False
                 else:
-                    raise FormatError('Base rule name must be a string')
+                    raise FormatError(
+                        'Base rule name must be a string or a list of strings'
+                    )
 
             elif key == 'nice':
                 if value is None:
