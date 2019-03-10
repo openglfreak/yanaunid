@@ -474,4 +474,10 @@ class PropertyMatcher(Matcher):
             inverted=invert
         )
 
+
+# Has to be at the bottom because rule.py imports this module
+# If Rule is not imported, mypy complains that it can't find that type
+# pylint: disable=wrong-import-position,unused-import,cyclic-import
+from .rule import Rule  # noqa: E402
+
 # vim: ai ts=4 sts=4 et sw=4 tw=79 ft=python
