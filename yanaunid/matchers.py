@@ -16,7 +16,7 @@ __all__ = ('Matcher', 'NeverMatchingMatcher', 'DefaultMatcher',
 
 
 # pylint: disable=too-few-public-methods
-class Matcher(abc.ABC):
+class Matcher(metaclass=abc.ABCMeta):
     __slots__ = ()
 
     @abc.abstractmethod
