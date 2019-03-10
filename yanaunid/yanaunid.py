@@ -149,6 +149,17 @@ class Yanaunid:
             except (ProcessLookupError, psutil.NoSuchProcess):
                 pass
 
+    def _cleanup_ignored_rules(self) -> None:
+        dead_processes: List[psutil.Process] = []
+
+        for process in self._ignored_rules:
+            if (not process.is_running()
+                    or process.state() == psutil.STATUS_ZOMBIE):
+                dead_processes.append(process)
+
+        for process in dead_processes:
+            del self._ignored_rules[process]
+
     def run(self) -> None:
         if not self.rules:
             self.logger.fatal('No rules loaded')
@@ -169,6 +180,7 @@ class Yanaunid:
             time.sleep(sleep_time)
             if float(end) >= len(proc_ids):
                 proc_ids = psutil.pids()
+                self._cleanup_ignored_rules()
                 start = 0
                 step = len(proc_ids) / self.settings.slices
             else:
